@@ -10,17 +10,96 @@ import streamlit as st
 from PIL import Image
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 
-from config import FACES_DIR, MATCH_THRESHOLD, ATTENDANCE_COOLDOWN_SECONDS
+from config import (FACES_DIR, MATCH_THRESHOLD, ATTENDANCE_COOLDOWN_SECONDS,
+                    WORK_START_TIME, WORK_END_TIME, LATE_GRACE_MINUTES, MIN_HOURS_BEFORE_AUTO_CHECKOUT)
 from database import (
     init_db, add_employee, get_employees, add_embedding, get_all_embeddings,
-    record_check_in, record_check_out, get_attendance, attendance_summary,
-    set_employee_active
+    record_check_in, record_face_attendance, record_check_out, get_attendance,
+    get_missing_checkouts, attendance_summary, set_employee_active,
+    log_recognition_attempt, recognition_statistics, recent_attendance_activity,
+    weekly_attendance_counts, attendance_distribution
 )
 from face_engine import FaceEngine
 
 st.set_page_config(page_title="Face Recognition Attendance", page_icon="🧑‍💼", layout="wide")
 init_db()
 FACES_DIR.mkdir(parents=True, exist_ok=True)
+
+# Traditional Myanmar-inspired burgundy and royal-gold visual theme.
+def apply_theme():
+    st.markdown(
+        """
+        <style>
+        :root {
+            --royal-burgundy: #570000;
+            --deep-maroon: #2B0000;
+            --royal-gold: #D9A02E;
+            --warm-ivory: #FFF3D8;
+            --soft-gold: #F3D28A;
+        }
+        .stApp {
+            background: linear-gradient(135deg, #2B0000 0%, #570000 58%, #3B0000 100%);
+            color: var(--warm-ivory);
+        }
+        [data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #260000 0%, #4A0000 62%, #2B0000 100%);
+            border-right: 2px solid var(--royal-gold);
+        }
+        [data-testid="stSidebar"] h1,
+        [data-testid="stSidebar"] h2,
+        [data-testid="stSidebar"] h3 {
+            color: var(--royal-gold) !important;
+            text-shadow: 0 1px 8px rgba(217,160,46,.22);
+        }
+        [data-testid="stSidebar"] label,
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] span { color: var(--warm-ivory); }
+        h1, h2, h3, h4 { color: var(--royal-gold) !important; }
+        p, label, [data-testid="stCaption"] { color: var(--warm-ivory); }
+        [data-testid="stMetric"],
+        [data-testid="stForm"],
+        [data-testid="stExpander"] {
+            background: rgba(43, 0, 0, .62);
+            border: 1px solid rgba(217, 160, 46, .62);
+            border-radius: 12px;
+            padding: 12px;
+        }
+        [data-testid="stMetricLabel"], [data-testid="stMetricValue"] {
+            color: var(--soft-gold) !important;
+        }
+        .stButton > button, .stDownloadButton > button,
+        [data-testid="stFormSubmitButton"] > button {
+            background: linear-gradient(135deg, #E8B94E, #C58A1D) !important;
+            color: #2B0000 !important;
+            border: 1px solid #F5D98E !important;
+            border-radius: 9px !important;
+            font-weight: 700 !important;
+        }
+        .stButton > button:hover, .stDownloadButton > button:hover {
+            background: #F5D98E !important;
+            border-color: #FFF3D8 !important;
+        }
+        [data-baseweb="input"] input,
+        [data-baseweb="textarea"] textarea,
+        [data-baseweb="select"] > div,
+        [data-testid="stDateInput"] input {
+            background: var(--warm-ivory) !important;
+            color: #3B1700 !important;
+            border-color: var(--royal-gold) !important;
+        }
+        [data-testid="stRadio"] label { color: var(--warm-ivory) !important; }
+        [data-testid="stDataFrame"] {
+            border: 1px solid rgba(217, 160, 46, .7);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        hr { border-color: rgba(217, 160, 46, .55); }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+apply_theme()
 
 @st.cache_resource
 def load_engine():
@@ -40,14 +119,73 @@ def save_face_sample(employee_id, face_rgb, embedding):
 def page_dashboard():
     st.title("📊 Attendance Dashboard")
     summary = attendance_summary()
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Active Employees", summary["total"])
-    c2.metric("Present Today", summary["present"])
-    c3.metric("Absent Today", summary["absent"])
-    rows = get_attendance(date.today(), date.today())
-    st.subheader("Today's Attendance")
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    st.caption("Attendance is recorded once per employee per calendar day. Use the Attendance Records page to enter a check-out.")
+    today_rows = get_attendance(date.today(), date.today())
+    late_count = sum(1 for row in today_rows if int(row.get("late_minutes") or 0) > 0)
+
+    st.subheader("Summary Cards")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Employees", summary["total"])
+    c2.metric("Present", summary["present"])
+    c3.metric("Absent", summary["absent"])
+    c4.metric("Late", late_count)
+
+    st.divider()
+    left, right = st.columns(2)
+    with left:
+        st.subheader("Weekly Attendance Analytics")
+        weekly_df = pd.DataFrame(weekly_attendance_counts(7))
+        if not weekly_df.empty:
+            st.bar_chart(weekly_df.set_index("Date"), y="Present", use_container_width=True)
+        else:
+            st.info("No weekly attendance data yet.")
+    with right:
+        st.subheader("Attendance Distribution")
+        distribution_df = pd.DataFrame(attendance_distribution())
+        if int(distribution_df["Employees"].sum()) > 0:
+            st.vega_lite_chart(
+                distribution_df,
+                {
+                    "mark": {"type": "arc", "innerRadius": 55},
+                    "encoding": {
+                        "theta": {"field": "Employees", "type": "quantitative"},
+                        "color": {"field": "Status", "type": "nominal",
+                                  "scale": {"domain": ["Present", "Absent"], "range": ["#D9A02E", "#8B2929"]}},
+                        "tooltip": [{"field": "Status"}, {"field": "Employees"}]
+                    }
+                },
+                use_container_width=True
+            )
+            st.dataframe(distribution_df, hide_index=True, use_container_width=True)
+        else:
+            st.info("No employee attendance distribution to display.")
+
+    st.divider()
+    st.subheader("Recent Attendance Activity")
+    activity = recent_attendance_activity(10)
+    if activity:
+        activity_df = pd.DataFrame(activity).rename(columns={
+            "event_time": "Time", "event_type": "Activity", "employee_id": "Employee ID",
+            "full_name": "Employee Name", "department": "Department", "method": "Method", "note": "Details"
+        })
+        st.dataframe(activity_df[["Time", "Employee ID", "Employee Name", "Department", "Activity", "Method", "Details"]],
+                     use_container_width=True, hide_index=True)
+    else:
+        st.info("No attendance activity recorded yet.")
+
+    st.divider()
+    st.subheader("AI Recognition Statistics — Today")
+    ai = recognition_statistics()
+    a1, a2, a3 = st.columns(3)
+    a1.metric("Recognition Success", ai["success"])
+    a2.metric("Unknown Face", ai["unknown"])
+    a3.metric("Failed Attempts", ai["failed"])
+    st.caption("Recognition statistics count throttled camera recognition outcomes recorded by the Live Recognition page.")
+
+    missing = get_missing_checkouts(date.today())
+    if missing:
+        st.error(f"Missing check-out alert: {len(missing)} employee(s) have not checked out.")
+        st.dataframe(pd.DataFrame(missing), use_container_width=True, hide_index=True)
+    st.caption(f"Shift: {WORK_START_TIME}–{WORK_END_TIME} | Late grace: {LATE_GRACE_MINUTES} minutes | Face auto check-out requires a second recognition at least {MIN_HOURS_BEFORE_AUTO_CHECKOUT} hours after check-in.")
 
 def page_employees(engine):
     st.title("👥 Employee Registration")
@@ -103,6 +241,7 @@ class AttendanceVideoProcessor(VideoProcessorBase):
         self.last_seen = {}
         self.last_refresh = 0
         self.last_message = "Waiting for camera…"
+        self.last_stats_log = {}
 
     def recv(self, frame):
         image = frame.to_ndarray(format="bgr24")
@@ -118,16 +257,28 @@ class AttendanceVideoProcessor(VideoProcessorBase):
                 match, distance = self.engine.recognize(face_rgb, self.known, MATCH_THRESHOLD)
                 if match:
                     employee_id = match["employee_id"]
+                    stats_key = f"success:{employee_id}"
+                    if now - self.last_stats_log.get(stats_key, 0) >= 5:
+                        log_recognition_attempt("success", employee_id, float(distance))
+                        self.last_stats_log[stats_key] = now
                     label = f'{match["full_name"]} ({distance:.2f})'
                     if now - self.last_seen.get(employee_id, 0) > ATTENDANCE_COOLDOWN_SECONDS:
-                        success, msg = record_check_in(employee_id)
+                        state, msg = record_face_attendance(employee_id)
                         self.last_seen[employee_id] = now
                         self.last_message = f'{employee_id}: {msg}'
                     color = (0, 180, 0)
                 else:
+                    stats_key = "unknown"
+                    if now - self.last_stats_log.get(stats_key, 0) >= 5:
+                        log_recognition_attempt("unknown", distance=float(distance))
+                        self.last_stats_log[stats_key] = now
                     label = "Unknown"
                     color = (0, 0, 220)
             except Exception as exc:
+                stats_key = "failed"
+                if now - self.last_stats_log.get(stats_key, 0) >= 5:
+                    log_recognition_attempt("failed", details=str(exc)[:200])
+                    self.last_stats_log[stats_key] = now
                 label, color = f"Error: {str(exc)[:30]}", (0, 165, 255)
             cv2.rectangle(image, (x, y), (x+w, y+h), color, 2)
             cv2.putText(image, label, (x, max(25, y-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
@@ -151,7 +302,7 @@ def page_live_recognition():
         media_stream_constraints={"video": True, "audio": False},
         async_processing=True,
     )
-    st.caption("A successful first match creates today's check-in. Repeated detections do not create duplicate daily rows.")
+    st.caption(f"First recognized appearance records check-in. A later recognition records check-out only after {MIN_HOURS_BEFORE_AUTO_CHECKOUT} hours, preventing repeated camera frames from immediately closing attendance. Daily duplicate rows are blocked by the database unique constraint.")
 
 def page_records():
     st.title("🗓️ Attendance Records")
@@ -167,14 +318,22 @@ def page_records():
     if not df.empty:
         st.download_button("Download CSV", df.to_csv(index=False).encode("utf-8-sig"),
                            file_name=f"attendance_{start}_{end}.csv", mime="text/csv")
-    st.subheader("Record Check-out")
+    st.subheader("Attendance Status & Alerts")
+    missing = get_missing_checkouts(date.today())
+    if missing:
+        st.error(f"Missing check-out: {len(missing)} employee(s) have an open attendance record.")
+        st.dataframe(pd.DataFrame(missing), use_container_width=True, hide_index=True)
+    else:
+        st.success("No missing check-out alert for today (or the scheduled shift has not ended yet).")
+
+    st.subheader("Manual Check-out (Fallback)")
     employees = get_employees()
     if employees:
         selected = st.selectbox("Employee", employees,
                                 format_func=lambda e: f'{e["employee_id"]} — {e["full_name"]}')
         if st.button("Record Check-out", type="primary"):
             if record_check_out(selected["employee_id"]):
-                st.success("Check-out recorded.")
+                st.success("Check-out recorded and working hours calculated.")
             else:
                 st.warning("No open check-in found for this employee today.")
     else:
@@ -195,7 +354,7 @@ def page_settings():
             st.rerun()
 
 def main():
-    st.sidebar.title("Face Attendance")
+    st.sidebar.title("Intelligent Facial Recognition & Automated Attendance System")
     page = st.sidebar.radio("Navigation", [
         "Dashboard", "Employee Registration", "Live Recognition", "Attendance Records", "Settings"
     ])
