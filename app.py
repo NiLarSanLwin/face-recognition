@@ -29,72 +29,102 @@ FACES_DIR.mkdir(parents=True, exist_ok=True)
 def apply_theme():
     st.markdown(
         """
-        <style>
-        :root {
-            --royal-burgundy: #570000;
-            --deep-maroon: #2B0000;
-            --royal-gold: #D9A02E;
-            --warm-ivory: #FFF3D8;
-            --soft-gold: #F3D28A;
-        }
-        .stApp {
-            background: linear-gradient(135deg, #2B0000 0%, #570000 58%, #3B0000 100%);
-            color: var(--warm-ivory);
-        }
-        [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #260000 0%, #4A0000 62%, #2B0000 100%);
-            border-right: 2px solid var(--royal-gold);
-        }
-        [data-testid="stSidebar"] h1,
-        [data-testid="stSidebar"] h2,
-        [data-testid="stSidebar"] h3 {
-            color: var(--royal-gold) !important;
-            text-shadow: 0 1px 8px rgba(217,160,46,.22);
-        }
-        [data-testid="stSidebar"] label,
-        [data-testid="stSidebar"] p,
-        [data-testid="stSidebar"] span { color: var(--warm-ivory); }
-        h1, h2, h3, h4 { color: var(--royal-gold) !important; }
-        p, label, [data-testid="stCaption"] { color: var(--warm-ivory); }
-        [data-testid="stMetric"],
-        [data-testid="stForm"],
-        [data-testid="stExpander"] {
-            background: rgba(43, 0, 0, .62);
-            border: 1px solid rgba(217, 160, 46, .62);
-            border-radius: 12px;
-            padding: 12px;
-        }
-        [data-testid="stMetricLabel"], [data-testid="stMetricValue"] {
-            color: var(--soft-gold) !important;
-        }
-        .stButton > button, .stDownloadButton > button,
-        [data-testid="stFormSubmitButton"] > button {
-            background: linear-gradient(135deg, #E8B94E, #C58A1D) !important;
-            color: #2B0000 !important;
-            border: 1px solid #F5D98E !important;
-            border-radius: 9px !important;
-            font-weight: 700 !important;
-        }
-        .stButton > button:hover, .stDownloadButton > button:hover {
-            background: #F5D98E !important;
-            border-color: #FFF3D8 !important;
-        }
-        [data-baseweb="input"] input,
-        [data-baseweb="textarea"] textarea,
-        [data-baseweb="select"] > div,
-        [data-testid="stDateInput"] input {
-            background: var(--warm-ivory) !important;
-            color: #3B1700 !important;
-            border-color: var(--royal-gold) !important;
-        }
-        [data-testid="stRadio"] label { color: var(--warm-ivory) !important; }
-        [data-testid="stDataFrame"] {
-            border: 1px solid rgba(217, 160, 46, .7);
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        hr { border-color: rgba(217, 160, 46, .55); }
-        </style>
+       
+<style>
+    :root {
+        --royal-burgundy: #570000;
+        --deep-maroon: #2B0000;
+        --royal-gold: #D9A02E;
+        --warm-ivory: #FFF3D8;
+        --soft-gold: #F3D28A;
+        --background-blue: #DCEEFF;
+    }
+
+    .stApp {
+        background: #DCEEFF !important;
+        color: var(--deep-maroon);
+    }
+
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #EAF4FF 0%, #DCEEFF 62%, #C9E2FF 100%);
+        border-right: 2px solid var(--royal-gold);
+    }
+
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3 {
+        color: var(--royal-burgundy) !important;
+        text-shadow: 0 1px 8px rgba(217,160,46,.22);
+    }
+
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span {
+        color: var(--deep-maroon);
+    }
+
+    h1, h2, h3, h4 {
+        color: var(--royal-burgundy) !important;
+    }
+
+    p, label, [data-testid="stCaption"] {
+        color: var(--deep-maroon);
+    }
+
+    [data-testid="stMetric"],
+    [data-testid="stForm"],
+    [data-testid="stExpander"] {
+        background: rgba(255,255,255,.75);
+        border: 1px solid rgba(217,160,46,.75);
+        border-radius: 12px;
+        padding: 12px;
+    }
+
+    [data-testid="stMetricLabel"],
+    [data-testid="stMetricValue"] {
+        color: var(--royal-burgundy) !important;
+    }
+
+    .stButton > button,
+    .stDownloadButton > button,
+    [data-testid="stFormSubmitButton"] > button {
+        background: linear-gradient(135deg, #E8B94E, #C58A1D) !important;
+        color: #2B0000 !important;
+        border: 1px solid #F5D98E !important;
+        border-radius: 9px !important;
+        font-weight: 700 !important;
+    }
+
+    .stButton > button:hover,
+    .stDownloadButton > button:hover {
+        background: #F5D98E !important;
+        border-color: #FFF3D8 !important;
+    }
+
+    [data-baseweb="input"] input,
+    [data-baseweb="textarea"] textarea,
+    [data-baseweb="select"] > div,
+    [data-testid="stDateInput"] input {
+        background: #FFFFFF !important;
+        color: #3B1700 !important;
+        border-color: var(--royal-gold) !important;
+    }
+
+    [data-testid="stRadio"] label {
+        color: var(--deep-maroon) !important;
+    }
+
+    [data-testid="stDataFrame"] {
+        border: 1px solid rgba(217,160,46,.7);
+        border-radius: 10px;
+        overflow: hidden;
+    }
+
+    hr {
+        border-color: rgba(87,0,0,.25);
+    }
+</style>
+
         """,
         unsafe_allow_html=True,
     )
