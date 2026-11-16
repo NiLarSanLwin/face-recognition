@@ -1,5 +1,5 @@
 from pathlib import Path
-from config import WORK_START_TIME
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
