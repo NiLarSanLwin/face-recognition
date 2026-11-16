@@ -32,8 +32,8 @@ def apply_theme():
        
 <style>
     :root {
-        --royal-burgundy: #570000;
-        --deep-maroon: #2B0000;
+        --royal-burgundy: #D63384;
+        --deep-maroon: #D63384;
         --royal-gold: #D9A02E;
         --warm-ivory: #FFF3D8;
         --soft-gold: #F3D28A;
