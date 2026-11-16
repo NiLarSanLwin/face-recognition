@@ -123,6 +123,38 @@ def apply_theme():
     hr {
         border-color: rgba(87,0,0,.25);
     }
+    
+/* Streamlit Top Toolbar Background */
+.stAppHeader {
+    background: #DCEEFF !important;
+}
+
+/* Toolbar Container */
+[data-testid="stToolbar"],
+[data-testid="stToolbarActions"] {
+    background: #DCEEFF !important;
+}
+
+/* Header Action Buttons */
+[data-testid="stBaseButton-header"],
+[data-testid="stMainMenuButton"] {
+    background: #DCEEFF !important;
+    color: #570000 !important;
+    border: none !important;
+}
+
+/* Toolbar Button Hover */
+[data-testid="stBaseButton-header"]:hover,
+[data-testid="stMainMenuButton"]:hover {
+    background: #C9E2FF !important;
+}
+
+/* Toolbar Icons */
+[data-testid="stToolbar"] svg {
+    color: #570000 !important;
+    fill: #570000 !important;
+}
+
 </style>
 
         """,
