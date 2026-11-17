@@ -61,17 +61,13 @@ class FaceEngine:
             return {"employee_id": best_id, "full_name": best_name}, best_distance
         return None, best_distance
 
-
-class FaceLivenessDetector:
+class BlinkLivenessDetector:
     """
-    Basic blink-challenge liveness check using OpenCV's Haar eye cascade.
-
-    This is a lightweight educational/demo check, not production-grade
-    anti-spoofing. Eye-detection failures can be caused by lighting, glasses,
-    pose, or camera quality, and replay attacks may still bypass it.
+    Basic blink challenge for a classroom/demo prototype.
+    Requires: eyes open -> eyes not detected (blink) -> eyes open.
+    This is not a production anti-spoofing system.
     """
-    def __init__(self, max_track_distance=100, track_timeout=3.0,
-                 challenge_timeout=12.0, consecutive_frames=2):
+    def __init__(self, max_track_distance=100, track_timeout=3.0, challenge_timeout=10.0):
         eye_path = cv2.data.haarcascades + "haarcascade_eye.xml"
         self.eye_detector = cv2.CascadeClassifier(eye_path)
         if self.eye_detector.empty():
@@ -79,87 +75,86 @@ class FaceLivenessDetector:
         self.max_track_distance = max_track_distance
         self.track_timeout = track_timeout
         self.challenge_timeout = challenge_timeout
-        self.consecutive_frames = consecutive_frames
         self.tracks = {}
-        self.next_track_id = 1
+        self.next_id = 0
 
-    def _eyes_open(self, frame_bgr, box):
+    def _eye_state(self, frame_bgr, box):
         x, y, w, h = box
-        height, width = frame_bgr.shape[:2]
-        x1, y1 = max(0, x), max(0, y)
-        x2, y2 = min(width, x + w), min(height, y + int(h * 0.62))
-        roi = frame_bgr[y1:y2, x1:x2]
-        if roi.size == 0 or roi.shape[0] < 20 or roi.shape[1] < 20:
-            return None
+        roi = frame_bgr[y:y + int(h * 0.62), x:x + w]
+        if roi.size == 0:
+            return False
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        gray = cv2.equalizeHist(gray)
         eyes = self.eye_detector.detectMultiScale(
-            gray, scaleFactor=1.1, minNeighbors=4, minSize=(10, 10)
+            gray, scaleFactor=1.1, minNeighbors=5,
+            minSize=(max(8, w // 12), max(8, h // 12))
         )
-        # Two detected eyes are stronger evidence than one, but Haar may
-        # detect only one eye when the face is slightly turned.
-        return len(eyes) >= 1
+        return len(eyes) > 0
 
-    def update(self, frame_bgr, boxes):
-        """Return {box_index: (is_live, instruction)} for the current frame."""
-        now = time.time()
-        for track_id in list(self.tracks):
-            if now - self.tracks[track_id]["last_seen"] > self.track_timeout:
-                del self.tracks[track_id]
+    def update(self, frame_bgr, boxes, now):
+        """Return one (verified, message) tuple for each face box."""
+        results = []
+        used_tracks = set()
 
-        results = {}
-        assigned = set()
-        for index, box in enumerate(boxes):
+        for box in boxes:
             x, y, w, h = box
-            center = (x + w / 2.0, y + h / 2.0)
-            best_id, best_distance = None, float("inf")
+            center = (x + w / 2, y + h / 2)
+            best_id, best_dist = None, float("inf")
+
             for track_id, track in self.tracks.items():
-                if track_id in assigned:
+                if track_id in used_tracks:
                     continue
                 tx, ty = track["center"]
-                distance = ((center[0] - tx) ** 2 + (center[1] - ty) ** 2) ** 0.5
-                if distance < best_distance:
-                    best_id, best_distance = track_id, distance
+                dist = ((center[0] - tx) ** 2 + (center[1] - ty) ** 2) ** 0.5
+                if dist < best_dist:
+                    best_id, best_dist = track_id, dist
 
-            if best_id is None or best_distance > self.max_track_distance:
-                best_id = self.next_track_id
-                self.next_track_id += 1
+            if best_id is None or best_dist > self.max_track_distance:
+                best_id = self.next_id
+                self.next_id += 1
                 self.tracks[best_id] = {
-                    "center": center, "last_seen": now, "started": now,
-                    "phase": "WAIT_OPEN", "open_count": 0, "closed_count": 0
+                    "center": center, "state": "WAIT_OPEN",
+                    "last_seen": now, "started": now
                 }
 
-            assigned.add(best_id)
+            used_tracks.add(best_id)
             track = self.tracks[best_id]
             track["center"] = center
             track["last_seen"] = now
 
-            if track["phase"] != "LIVE" and now - track["started"] > self.challenge_timeout:
-                track.update(phase="WAIT_OPEN", open_count=0, closed_count=0, started=now)
+            if now - track["started"] > self.challenge_timeout and track["state"] != "LIVE":
+                track["state"] = "WAIT_OPEN"
+                track["started"] = now
 
-            eyes_open = self._eyes_open(frame_bgr, box)
-            if eyes_open is True:
-                track["open_count"] += 1
-                track["closed_count"] = 0
-                if track["phase"] == "WAIT_OPEN" and track["open_count"] >= self.consecutive_frames:
-                    track["phase"] = "OPEN"
-                elif track["phase"] == "CLOSED" and track["open_count"] >= self.consecutive_frames:
-                    track["phase"] = "LIVE"
-            elif eyes_open is False:
-                track["closed_count"] += 1
-                track["open_count"] = 0
-                if track["phase"] == "OPEN" and track["closed_count"] >= self.consecutive_frames:
-                    track["phase"] = "CLOSED"
+            eyes_open = self._eye_state(frame_bgr, box)
+            if track["state"] == "WAIT_OPEN":
+                if eyes_open:
+                    track["state"] = "WAIT_BLINK"
+                    message = "Blink your eyes"
+                else:
+                    message = "Look at camera / keep eyes open"
+            elif track["state"] == "WAIT_BLINK":
+                if not eyes_open:
+                    track["state"] = "WAIT_REOPEN"
+                    message = "Open your eyes"
+                else:
+                    message = "Blink your eyes"
+            elif track["state"] == "WAIT_REOPEN":
+                if eyes_open:
+                    track["state"] = "LIVE"
+                    message = "Liveness verified"
+                else:
+                    message = "Open your eyes"
             else:
-                track["open_count"] = 0
-                track["closed_count"] = 0
+                message = "Liveness verified"
 
-            if track["phase"] == "LIVE":
-                results[index] = (True, "Liveness verified")
-            elif track["phase"] == "WAIT_OPEN":
-                results[index] = (False, "Look at camera / keep eyes open")
-            elif track["phase"] == "OPEN":
-                results[index] = (False, "Blink your eyes")
-            else:
-                results[index] = (False, "Open your eyes")
+            results.append((track["state"] == "LIVE", message))
+
+        stale = [
+            track_id for track_id, track in self.tracks.items()
+            if now - track["last_seen"] > self.track_timeout
+        ]
+        for track_id in stale:
+            del self.tracks[track_id]
+
         return results
+
