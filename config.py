@@ -1,5 +1,5 @@
 from pathlib import Path
-
+from datetime import time
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -16,7 +16,7 @@ MIN_FACE_SIZE = 60
 ATTENDANCE_COOLDOWN_SECONDS = 60
 
 # Default shift policy. Change these values to match the organization's work schedule.
-WORK_START_TIME = "09:00"
+WORK_START_TIME = time(9, 0)
 WORK_END_TIME = "17:00"
 LATE_GRACE_MINUTES = 15
 # A second face recognition can become check-out only after this minimum elapsed time.
