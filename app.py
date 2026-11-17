@@ -17,12 +17,14 @@ from database import (
     record_check_in, record_face_attendance, record_check_out, get_attendance,
     get_missing_checkouts, attendance_summary, set_employee_active,
     log_recognition_attempt, recognition_statistics, recent_attendance_activity,
-    weekly_attendance_counts, attendance_distribution
+    weekly_attendance_counts, attendance_distribution,
+    ensure_default_admin, authenticate_user, create_employee_user, get_employee_today_status
 )
 from face_engine import FaceEngine, BlinkLivenessDetector
 
 st.set_page_config(page_title="Face Recognition Attendance", page_icon="🧑‍💼", layout="wide")
 init_db()
+ensure_default_admin()
 FACES_DIR.mkdir(parents=True, exist_ok=True)
 
 # Traditional Myanmar-inspired burgundy and royal-gold visual theme.
@@ -256,14 +258,17 @@ def page_employees(engine):
         full_name = st.text_input("Full name *")
         department = st.text_input("Department")
         email = st.text_input("Email")
+        login_user_id = st.text_input("User Login ID *")
+        login_password = st.text_input("User Login Password *", type="password")
         submitted = st.form_submit_button("Create Employee", type="primary")
     if submitted:
-        if not employee_id.strip() or not full_name.strip():
-            st.error("Employee ID and full name are required.")
+        if not employee_id.strip() or not full_name.strip() or not login_user_id.strip() or not login_password:
+            st.error("Employee ID, full name, User Login ID and password are required.")
         else:
             try:
                 add_employee(employee_id, full_name, department, email)
-                st.success("Employee created. Capture face samples below.")
+                create_employee_user(login_user_id, login_password, employee_id.strip())
+                st.success("Employee and user login created. Capture face samples below.")
             except Exception as exc:
                 st.error(f"Could not create employee: {exc}")
 
@@ -297,7 +302,8 @@ def page_employees(engine):
                 st.write(f'{e["employee_id"]} — {e["full_name"]}')
 
 class AttendanceVideoProcessor(VideoProcessorBase):
-    def __init__(self):
+    def __init__(self, allowed_employee_id=None):
+        self.allowed_employee_id = allowed_employee_id
         self.engine = load_engine()
         self.known = get_all_embeddings()
         self.liveness = BlinkLivenessDetector()
@@ -330,6 +336,11 @@ class AttendanceVideoProcessor(VideoProcessorBase):
                 match, distance = self.engine.recognize(face_rgb, self.known, MATCH_THRESHOLD)
                 if match:
                     employee_id = match["employee_id"]
+                    if self.allowed_employee_id and employee_id != self.allowed_employee_id:
+                        label, color = "Different user", (0, 0, 220)
+                        cv2.rectangle(image, (x, y), (x+w, y+h), color, 2)
+                        cv2.putText(image, label, (x, max(25, y-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                        continue
                     stats_key = f"success:{employee_id}"
                     if now - self.last_stats_log.get(stats_key, 0) >= 5:
                         log_recognition_attempt("success", employee_id, float(distance))
@@ -359,7 +370,7 @@ class AttendanceVideoProcessor(VideoProcessorBase):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
         return av.VideoFrame.from_ndarray(image, format="bgr24")
 
-def page_live_recognition():
+def page_live_recognition(allowed_employee_id=None):
     st.title("📷 Live Face Recognition & Check-in")
     st.warning("Blink challenge enabled: keep your eyes open, blink once, then open them again. This is a basic demo and does not reliably prevent photo/video replay attacks. Obtain informed employee consent.")
     known = get_all_embeddings()
@@ -370,7 +381,7 @@ def page_live_recognition():
     rtc_config = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
     webrtc_streamer(
         key="attendance-camera",
-        video_processor_factory=AttendanceVideoProcessor,
+        video_processor_factory=(lambda: AttendanceVideoProcessor(allowed_employee_id)),
         rtc_configuration=rtc_config,
         media_stream_constraints={"video": True, "audio": False},
         async_processing=True,
@@ -426,11 +437,63 @@ def page_settings():
             set_employee_active(emp["employee_id"], new_state)
             st.rerun()
 
+def page_user_panel(employee_id):
+    employees = {e["employee_id"]: e for e in get_employees(active_only=False)}
+    emp = employees.get(employee_id)
+    if not emp:
+        st.error("Employee account is not linked to an employee record. Contact the administrator.")
+        return
+    st.title("👤 User Panel")
+    st.subheader(f'{emp["full_name"]} ({employee_id})')
+    today = get_employee_today_status(employee_id)
+    c1, c2 = st.columns(2)
+    c1.metric("Today's Attendance", today["status"])
+    c2.metric("Check-in Time", today["check_in"].replace("T", " ") if today["check_in"] else "—")
+    st.divider()
+    st.subheader("📷 My Face Recognition Attendance")
+    st.info(
+        "Camera ကိုဖွင့်ပြီး မိမိမျက်နှာကိုသာ Scan လုပ်ပါ။ "
+        "Blink challenge အောင်မြင်ပြီး မိမိ Face ID ကိုက်ညီမှသာ Attendance မှတ်တမ်းတင်ပါမည်။"
+    )
+    # Restrict recognition to the employee linked to the currently authenticated account.
+    page_live_recognition(allowed_employee_id=employee_id)
+    st.caption(
+        "လုံခြုံရေးအတွက် အခြားဝန်ထမ်း၏မျက်နှာကို မှတ်မည်မဟုတ်ပါ။ "
+        "မိမိ၏ Check-in / Check-out အချိန်နှင့် Present / Absent အခြေအနေကိုသာ ပြသထားပါသည်။"
+    )
+    if st.button("🔄 Refresh My Attendance Status", key="refresh_my_attendance"):
+        st.rerun()
+
+def login_page():
+    st.title("🔐 Attendance System Login")
+    st.write("Admin Panel နှင့် User Panel သို့ ဝင်ရန် User ID နှင့် Password ဖြည့်ပါ။")
+    with st.form("login_form"):
+        user_id = st.text_input("User ID")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login", type="primary")
+    if submitted:
+        user = authenticate_user(user_id, password)
+        if user:
+            st.session_state["auth_user"] = user
+            st.rerun()
+        else:
+            st.error("User ID သို့မဟုတ် Password မှားယွင်းနေပါသည်။")
+
 def main():
-    st.sidebar.title("Intelligent Facial Recognition & Automated Attendance System")
-    page = st.sidebar.radio("Navigation", [
-        "Dashboard", "Employee Registration", "Live Recognition", "Attendance Records", "Settings"
-    ])
+    user = st.session_state.get("auth_user")
+    if not user:
+        login_page()
+        return
+    st.sidebar.title("Face Recognition Attendance")
+    st.sidebar.write(f'Logged in: **{user["user_id"]}**')
+    if st.sidebar.button("Logout"):
+        st.session_state.pop("auth_user", None)
+        st.rerun()
+    if user["role"] == "user":
+        page_user_panel(user["employee_id"])
+        return
+    st.sidebar.subheader("Admin Panel")
+    page = st.sidebar.radio("Navigation", ["Dashboard", "Employee Registration", "Live Recognition", "Attendance Records", "Settings"])
     try:
         engine = load_engine() if page in ("Employee Registration", "Live Recognition") else None
         if page == "Dashboard": page_dashboard()
@@ -441,7 +504,8 @@ def main():
     except Exception as exc:
         st.error(f"Application error: {exc}")
         st.exception(exc)
-        st.info("Check the installation steps and terminal output. First FaceNet model initialization may take time and download pretrained weights.")
+        st.info("Check installation steps and terminal output. First FaceNet model initialization may take time.")
+
 
 if __name__ == "__main__":
     main()
