@@ -237,14 +237,7 @@ def page_dashboard():
         st.info("No attendance activity recorded yet.")
 
     st.divider()
-    st.subheader("AI Recognition Statistics — Today")
-    ai = recognition_statistics()
-    a1, a2, a3 = st.columns(3)
-    a1.metric("Recognition Success", ai["success"])
-    a2.metric("Unknown Face", ai["unknown"])
-    a3.metric("Failed Attempts", ai["failed"])
-    st.caption("Recognition statistics count throttled camera recognition outcomes recorded by the Live Recognition page.")
-
+   
     missing = get_missing_checkouts(date.today())
     if missing:
         st.error(f"Missing check-out alert: {len(missing)} employee(s) have not checked out.")
