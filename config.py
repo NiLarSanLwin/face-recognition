@@ -21,3 +21,11 @@ WORK_END_TIME = "17:00"
 LATE_GRACE_MINUTES = 15
 # A second face recognition can become check-out only after this minimum elapsed time.
 MIN_HOURS_BEFORE_AUTO_CHECKOUT = 4
+
+# Liveness settings: blink-based demonstration using OpenCV Haar eye detection.
+# These values may need tuning for the camera, lighting, and users.
+LIVENESS_ENABLED = True
+LIVENESS_TRACK_MAX_DISTANCE = 100
+LIVENESS_TRACK_TIMEOUT_SECONDS = 3.0
+LIVENESS_CHALLENGE_TIMEOUT_SECONDS = 12.0
+LIVENESS_CONSECUTIVE_FRAMES = 2
