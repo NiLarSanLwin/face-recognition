@@ -87,6 +87,53 @@ def init_db():
         _add_column_if_missing(conn, "attendance", "check_out_method", "TEXT")
 
 
+def _password_hash(password, salt=None):
+    import os, hashlib
+    salt = salt or os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 200000)
+    return salt.hex() + "$" + digest.hex()
+
+def verify_password(password, stored):
+    import hashlib
+    try:
+        salt_hex, digest_hex = stored.split("$", 1)
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), 200000)
+        return digest.hex() == digest_hex
+    except Exception:
+        return False
+
+def ensure_default_admin():
+    with get_connection() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY, password_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('admin','user')),
+            employee_id TEXT UNIQUE, active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(employee_id) REFERENCES employees(employee_id))""")
+        if not conn.execute("SELECT 1 FROM users WHERE user_id='admin'").fetchone():
+            conn.execute("INSERT INTO users(user_id,password_hash,role,created_at) VALUES(?,?,?,?)",
+                ("admin", _password_hash("admin123"), "admin", datetime.now().isoformat(timespec='seconds')))
+
+def create_employee_user(user_id, password, employee_id):
+    with get_connection() as conn:
+        conn.execute("INSERT INTO users(user_id,password_hash,role,employee_id,created_at) VALUES(?,?,?,?,?)",
+            (user_id.strip(), _password_hash(password), "user", employee_id,
+             datetime.now().isoformat(timespec='seconds')))
+
+def authenticate_user(user_id, password):
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM users WHERE user_id=? AND active=1", (user_id.strip(),)).fetchone()
+    if row and verify_password(password, row["password_hash"]):
+        return {"user_id": row["user_id"], "role": row["role"], "employee_id": row["employee_id"]}
+    return None
+
+def get_employee_today_status(employee_id):
+    with get_connection() as conn:
+        row = conn.execute("SELECT check_in FROM attendance WHERE employee_id=? AND attendance_date=?",
+                           (employee_id, date.today().isoformat())).fetchone()
+    return {"status": "Present" if row else "Absent", "check_in": row["check_in"] if row else None}
+
+
 def add_employee(employee_id, full_name, department='', email=''):
     now = datetime.now().isoformat(timespec='seconds')
     with get_connection() as conn:
