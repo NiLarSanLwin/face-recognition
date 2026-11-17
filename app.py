@@ -11,10 +11,7 @@ from PIL import Image
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 
 from config import (FACES_DIR, MATCH_THRESHOLD, ATTENDANCE_COOLDOWN_SECONDS,
-                    WORK_START_TIME, WORK_END_TIME, LATE_GRACE_MINUTES, MIN_HOURS_BEFORE_AUTO_CHECKOUT,
-                    LIVENESS_ENABLED, LIVENESS_TRACK_MAX_DISTANCE,
-                    LIVENESS_TRACK_TIMEOUT_SECONDS, LIVENESS_CHALLENGE_TIMEOUT_SECONDS,
-                    LIVENESS_CONSECUTIVE_FRAMES)
+                    WORK_START_TIME, WORK_END_TIME, LATE_GRACE_MINUTES, MIN_HOURS_BEFORE_AUTO_CHECKOUT)
 from database import (
     init_db, add_employee, get_employees, add_embedding, get_all_embeddings,
     record_check_in, record_face_attendance, record_check_out, get_attendance,
@@ -22,7 +19,7 @@ from database import (
     log_recognition_attempt, recognition_statistics, recent_attendance_activity,
     weekly_attendance_counts, attendance_distribution
 )
-from face_engine import FaceEngine, FaceLivenessDetector
+from face_engine import FaceEngine, BlinkLivenessDetector
 
 st.set_page_config(page_title="Face Recognition Attendance", page_icon="🧑‍💼", layout="wide")
 init_db()
@@ -303,18 +300,11 @@ class AttendanceVideoProcessor(VideoProcessorBase):
     def __init__(self):
         self.engine = load_engine()
         self.known = get_all_embeddings()
+        self.liveness = BlinkLivenessDetector()
         self.last_seen = {}
         self.last_refresh = 0
-        self.last_message = "Waiting for camera..."
+        self.last_message = "Waiting for camera…"
         self.last_stats_log = {}
-        self.liveness = (
-            FaceLivenessDetector(
-                max_track_distance=LIVENESS_TRACK_MAX_DISTANCE,
-                track_timeout=LIVENESS_TRACK_TIMEOUT_SECONDS,
-                challenge_timeout=LIVENESS_CHALLENGE_TIMEOUT_SECONDS,
-                consecutive_frames=LIVENESS_CONSECUTIVE_FRAMES,
-            ) if LIVENESS_ENABLED else None
-        )
 
     def recv(self, frame):
         image = frame.to_ndarray(format="bgr24")
@@ -322,110 +312,70 @@ class AttendanceVideoProcessor(VideoProcessorBase):
         if now - self.last_refresh > 10:
             self.known = get_all_embeddings()
             self.last_refresh = now
-
         boxes = self.engine.detect(image)
-        live_results = self.liveness.update(image, boxes) if self.liveness else {
-            i: (True, "Liveness check disabled") for i in range(len(boxes))
-        }
+        liveness_results = self.liveness.update(image, boxes, now)
 
-        for index, box in enumerate(boxes):
+        for box, (is_live, liveness_message) in zip(boxes, liveness_results):
             x, y, w, h = box
             try:
-                is_live, live_message = live_results.get(index, (False, "Liveness check pending"))
-
-                # Do not identify a person or write attendance until the blink
-                # challenge has passed for this tracked face.
                 if not is_live:
-                    label = f"Liveness: {live_message}"
+                    label = f"Liveness: {liveness_message}"
                     color = (0, 165, 255)
+                    cv2.rectangle(image, (x, y), (x+w, y+h), color, 2)
+                    cv2.putText(image, label[:55], (x, max(25, y-10)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                    continue
+
+                face_rgb = self.engine.crop_face_rgb(image, box)
+                match, distance = self.engine.recognize(face_rgb, self.known, MATCH_THRESHOLD)
+                if match:
+                    employee_id = match["employee_id"]
+                    stats_key = f"success:{employee_id}"
+                    if now - self.last_stats_log.get(stats_key, 0) >= 5:
+                        log_recognition_attempt("success", employee_id, float(distance))
+                        self.last_stats_log[stats_key] = now
+                    label = f'{match["full_name"]} ({distance:.2f})'
+                    if now - self.last_seen.get(employee_id, 0) > ATTENDANCE_COOLDOWN_SECONDS:
+                        state, msg = record_face_attendance(employee_id, method="FaceNet+BlinkLiveness")
+                        self.last_seen[employee_id] = now
+                        self.last_message = f'{employee_id}: {msg}'
+                    color = (0, 180, 0)
                 else:
-                    face_rgb = self.engine.crop_face_rgb(image, box)
-                    match, distance = self.engine.recognize(
-                        face_rgb, self.known, MATCH_THRESHOLD
-                    )
-
-                    if match:
-                        employee_id = match["employee_id"]
-                        stats_key = f"success:{employee_id}"
-                        if now - self.last_stats_log.get(stats_key, 0) >= 5:
-                            log_recognition_attempt("success", employee_id, float(distance))
-                            self.last_stats_log[stats_key] = now
-
-                        label = f'{match["full_name"]} ({distance:.2f})'
-                        if now - self.last_seen.get(employee_id, 0) > ATTENDANCE_COOLDOWN_SECONDS:
-                            state, msg = record_face_attendance(employee_id, method="FaceNet+Liveness")
-                            self.last_seen[employee_id] = now
-                            self.last_message = f'{employee_id}: {msg}'
-                        color = (0, 180, 0)
-                    else:
-                        stats_key = "unknown"
-                        if now - self.last_stats_log.get(stats_key, 0) >= 5:
-                            log_recognition_attempt("unknown", distance=float(distance))
-                            self.last_stats_log[stats_key] = now
-                        label = "Unknown Face"
-                        color = (0, 0, 220)
-
+                    stats_key = "unknown"
+                    if now - self.last_stats_log.get(stats_key, 0) >= 5:
+                        log_recognition_attempt("unknown", distance=float(distance))
+                        self.last_stats_log[stats_key] = now
+                    label = "Unknown"
+                    color = (0, 0, 220)
             except Exception as exc:
                 stats_key = "failed"
                 if now - self.last_stats_log.get(stats_key, 0) >= 5:
                     log_recognition_attempt("failed", details=str(exc)[:200])
                     self.last_stats_log[stats_key] = now
                 label, color = f"Error: {str(exc)[:30]}", (0, 165, 255)
-
             cv2.rectangle(image, (x, y), (x+w, y+h), color, 2)
-            cv2.putText(
-                image, label[:55], (x, max(25, y-10)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2
-            )
-
-        cv2.putText(
-            image, self.last_message[:90], (10, image.shape[0]-18),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2
-        )
+            cv2.putText(image, label, (x, max(25, y-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        cv2.putText(image, self.last_message[:90], (10, image.shape[0]-18),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
         return av.VideoFrame.from_ndarray(image, format="bgr24")
-
-
 
 def page_live_recognition():
     st.title("📷 Live Face Recognition & Check-in")
-    st.warning("Blink challenge enabled: keep your face in view, look at the camera, close your eyes briefly, then open them. Attendance is processed only after the liveness check passes. This basic Haar-eye check is a prototype and is not a guarantee against photo/video spoofing.")
+    st.warning("Blink challenge enabled: keep your eyes open, blink once, then open them again. This is a basic demo and does not reliably prevent photo/video replay attacks. Obtain informed employee consent.")
     known = get_all_embeddings()
     if not known:
         st.info("No face embeddings are registered yet. Register employees and capture face samples first.")
         return
-    st.caption(f"Recognition threshold: Euclidean distance ≤ {MATCH_THRESHOLD:.2f}. Calibrate this value with your own test images before operational use. Liveness: {'Enabled (blink challenge)' if LIVENESS_ENABLED else 'Disabled'}.")
+    st.caption(f"Recognition threshold: Euclidean distance ≤ {MATCH_THRESHOLD:.2f}. Liveness requires open eyes → blink → open eyes. Glasses, poor lighting, or camera angle may affect detection.")
     rtc_config = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
-rtc_configuration = {
-    "iceServers": [
-        {
-            "urls": [
-                "stun:stun.l.google.com:19302"
-            ]
-        },
-        {
-            "urls": [
-                "stun:stun1.l.google.com:19302"
-            ]
-        },
-        {
-            "urls": [
-                "stun:stun2.l.google.com:19302"
-            ]
-        }
-    ]
-}
-
-webrtc_ctx = webrtc_streamer(
-    key="face-recognition",
-    video_processor_factory=AttendanceVideoProcessor,
-    rtc_configuration=rtc_configuration,
-    media_stream_constraints={
-        "video": True,
-        "audio": False
-    },
-    async_processing=True
-)
-    st.caption(f"First verified recognition records check-in. A later verified recognition records check-out only after {MIN_HOURS_BEFORE_AUTO_CHECKOUT} hours. The cooldown reduces repeated frame processing, while the database UNIQUE(employee_id, attendance_date) constraint prevents duplicate daily attendance rows.")
+    webrtc_streamer(
+        key="attendance-camera",
+        video_processor_factory=AttendanceVideoProcessor,
+        rtc_configuration=rtc_config,
+        media_stream_constraints={"video": True, "audio": False},
+        async_processing=True,
+    )
+    st.caption(f"First recognized appearance records check-in. A later recognition records check-out only after {MIN_HOURS_BEFORE_AUTO_CHECKOUT} hours, preventing repeated camera frames from immediately closing attendance. Daily duplicate rows are blocked by the database unique constraint.")
 
 def page_records():
     st.title("🗓️ Attendance Records")
