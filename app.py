@@ -395,13 +395,36 @@ def page_live_recognition():
         return
     st.caption(f"Recognition threshold: Euclidean distance ≤ {MATCH_THRESHOLD:.2f}. Calibrate this value with your own test images before operational use. Liveness: {'Enabled (blink challenge)' if LIVENESS_ENABLED else 'Disabled'}.")
     rtc_config = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
-    webrtc_streamer(
-        key="attendance-camera",
-        video_processor_factory=AttendanceVideoProcessor,
-        rtc_configuration=rtc_config,
-        media_stream_constraints={"video": True, "audio": False},
-        async_processing=True,
-    )
+rtc_configuration = {
+    "iceServers": [
+        {
+            "urls": [
+                "stun:stun.l.google.com:19302"
+            ]
+        },
+        {
+            "urls": [
+                "stun:stun1.l.google.com:19302"
+            ]
+        },
+        {
+            "urls": [
+                "stun:stun2.l.google.com:19302"
+            ]
+        }
+    ]
+}
+
+webrtc_ctx = webrtc_streamer(
+    key="face-recognition",
+    video_processor_factory=AttendanceVideoProcessor,
+    rtc_configuration=rtc_configuration,
+    media_stream_constraints={
+        "video": True,
+        "audio": False
+    },
+    async_processing=True
+)
     st.caption(f"First verified recognition records check-in. A later verified recognition records check-out only after {MIN_HOURS_BEFORE_AUTO_CHECKOUT} hours. The cooldown reduces repeated frame processing, while the database UNIQUE(employee_id, attendance_date) constraint prevents duplicate daily attendance rows.")
 
 def page_records():
