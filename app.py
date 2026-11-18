@@ -195,56 +195,47 @@ def page_dashboard():
     c4.metric("Late", late_count)
 
     st.divider()
-    left,right = st.columns(2)
-    with left:        
-      st.subheader("Weekly Attendance Analytics")
-      weekly_df = pd.DataFrame(weekly_attendance_counts(7))
-      if not weekly_df.empty:
+  with st.container(border=True):
+    st.subheader("Weekly Attendance Analytics")
+
+    weekly_df = pd.DataFrame(weekly_attendance_counts(7))
+
+    if not weekly_df.empty:
         summary = attendance_summary()
         total_employees = summary["total"]
+
         weekly_df["Absent"] = (
-        total_employees - weekly_df["Present"]
+            total_employees - weekly_df["Present"]
         ).clip(lower=0)
-        # Convert Present and Absent into separate rows
+
         chart_df = weekly_df.melt(
-          id_vars=["Date"],
-          value_vars=["Present", "Absent"],
-          var_name="Status",
-          value_name="Employees"
-          ) 
+            id_vars=["Date"],
+            value_vars=["Present", "Absent"],
+            var_name="Status",
+            value_name="Employees"
+        )
+
         chart = alt.Chart(chart_df).mark_bar(
-        size=20
+            size=20
         ).encode(
-        x=alt.X(
-            "Date:N",
-            title="Date",
-            sort=None
-        ),
-        xOffset=alt.XOffset("Status:N"),
-        y=alt.Y(
-            "Employees:Q",
-            title="Number of Employees"
-        ),
-        color=alt.Color(
-            "Status:N",
-            scale=alt.Scale(
-                domain=["Present", "Absent"],
-                range=["#16A34A", "#DC2626"]
+            x=alt.X("Date:N", title="Date", sort=None),
+            xOffset=alt.XOffset("Status:N"),
+            y=alt.Y("Employees:Q", title="Number of Employees"),
+            color=alt.Color(
+                "Status:N",
+                scale=alt.Scale(
+                    domain=["Present", "Absent"],
+                    range=["#16A34A", "#DC2626"]
+                ),
+                legend=alt.Legend(title="Attendance Status")
             ),
-            legend=alt.Legend(title="Attendance Status")
-        ),
-        tooltip=["Date", "Status", "Employees"]
-        ).properties(
-        height=350
-        )
-        st.altair_chart(
-        chart,
-        use_container_width=True
-        )
-      else:
+            tooltip=["Date", "Status", "Employees"]
+        ).properties(height=350)
+
+        st.altair_chart(chart, use_container_width=True)
+
+    else:
         st.info("No weekly attendance data yet.")
-    with right:
-       
     st.divider()
     st.subheader("AI Recognition Statistics — Today")
     ai = recognition_statistics()
