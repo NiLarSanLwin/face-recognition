@@ -18,7 +18,7 @@ from database import (
     get_missing_checkouts, attendance_summary, set_employee_active,
     log_recognition_attempt, recognition_statistics, recent_attendance_activity,
     weekly_attendance_counts, attendance_distribution,
-    ensure_default_admin, authenticate_user, get_employee_today_status,
+    ensure_default_admin, authenticate_user,
     update_employee, delete_employee
 )
 from face_engine import FaceEngine, BlinkLivenessDetector
@@ -271,45 +271,65 @@ def page_employees(engine):
             except Exception as exc:
                 st.error(f"Could not create employee: {exc}")
 
+    notice = st.session_state.pop("employee_notice", None)
+    if notice:
+        st.success(notice)
+
     employees = get_employees(active_only=False)
     if employees:
         st.subheader("Employee Directory")
-        df = pd.DataFrame(employees)
-        st.dataframe(df[["employee_id", "full_name", "department", "email", "active", "created_at"]],
-                     use_container_width=True, hide_index=True)
-
-        st.markdown("#### Update Employee")
-        selected_edit = st.selectbox(
-            "Choose employee to update", employees,
-            format_func=lambda e: f'{e["employee_id"]} — {e["full_name"]}', key="edit_employee_select"
-        )
-        with st.form("update_employee_form"):
-            edit_name = st.text_input("Full name", value=selected_edit["full_name"])
-            edit_department = st.text_input("Department", value=selected_edit["department"] or "")
-            edit_email = st.text_input("Email", value=selected_edit["email"] or "")
-            update_submitted = st.form_submit_button("Update Employee", type="primary")
-        if update_submitted:
-            if not edit_name.strip():
-                st.error("Full name is required.")
-            elif update_employee(selected_edit["employee_id"], edit_name, edit_department, edit_email):
-                st.success("Employee information updated.")
+        # Directory table: the final two columns contain the requested row actions.
+        header = st.columns([1.15, 1.8, 1.4, 2.0, 0.85, 0.85])
+        for col, label in zip(header, ["Employee ID", "Full Name", "Department", "Email", "Update", "Delete"]):
+            col.markdown(f"**{label}**")
+        st.divider()
+        for emp in employees:
+            cols = st.columns([1.15, 1.8, 1.4, 2.0, 0.85, 0.85])
+            cols[0].write(emp["employee_id"])
+            cols[1].write(emp["full_name"])
+            cols[2].write(emp.get("department") or "—")
+            cols[3].write(emp.get("email") or "—")
+            if cols[4].button("Update", key=f'update_employee_{emp["employee_id"]}'):
+                st.session_state["edit_employee_id"] = emp["employee_id"]
                 st.rerun()
+            if cols[5].button("Delete", key=f'delete_employee_{emp["employee_id"]}'):
+                try:
+                    if delete_employee(emp["employee_id"]):
+                        import shutil
+                        shutil.rmtree(FACES_DIR / emp["employee_id"], ignore_errors=True)
+                        if st.session_state.get("edit_employee_id") == emp["employee_id"]:
+                            st.session_state.pop("edit_employee_id", None)
+                        st.session_state["employee_notice"] = f'{emp["full_name"]} (ID: {emp["employee_id"]}) ဝန်ထမ်းကို ဖျက်ပြီးပါပြီ။'
+                    else:
+                        st.session_state["employee_notice"] = "ဖျက်မည့် ဝန်ထမ်းကို ရှာမတွေ့ပါ။"
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Could not delete employee: {exc}")
+            st.divider()
 
-        st.markdown("#### Delete Employee")
-        delete_target = st.selectbox(
-            "Choose employee to delete", employees,
-            format_func=lambda e: f'{e["employee_id"]} — {e["full_name"]}', key="delete_employee_select"
-        )
-        confirm_delete = st.checkbox(
-            f'I understand that deleting {delete_target["full_name"]} permanently removes their attendance history and face samples.',
-            key="confirm_delete_employee"
-        )
-        if st.button("Delete Employee", type="secondary", disabled=not confirm_delete):
-            if delete_employee(delete_target["employee_id"]):
-                import shutil
-                shutil.rmtree(FACES_DIR / delete_target["employee_id"], ignore_errors=True)
-                st.success("Employee and related records deleted.")
+        # The edit form is hidden until the matching row's Update button is clicked.
+        edit_id = st.session_state.get("edit_employee_id")
+        selected_edit = next((e for e in employees if e["employee_id"] == edit_id), None)
+        if selected_edit:
+            st.markdown(f'#### Update Employee — {selected_edit["employee_id"]}')
+            with st.form("update_employee_form"):
+                edit_name = st.text_input("Full name", value=selected_edit["full_name"])
+                edit_department = st.text_input("Department", value=selected_edit.get("department") or "")
+                edit_email = st.text_input("Email", value=selected_edit.get("email") or "")
+                update_submitted = st.form_submit_button("Save Changes", type="primary")
+            cancel_col, _ = st.columns([1, 5])
+            if cancel_col.button("Cancel Update"):
+                st.session_state.pop("edit_employee_id", None)
                 st.rerun()
+            if update_submitted:
+                if not edit_name.strip():
+                    st.error("Full name is required.")
+                elif update_employee(selected_edit["employee_id"], edit_name, edit_department, edit_email):
+                    st.session_state.pop("edit_employee_id", None)
+                    st.session_state["employee_notice"] = f'{selected_edit["employee_id"]} ဝန်ထမ်းအချက်အလက်ကို ပြင်ဆင်ပြီးပါပြီ။'
+                    st.rerun()
+                else:
+                    st.error("Employee information could not be updated.")
 
         st.divider()
         st.subheader("Capture Face Samples")
@@ -330,6 +350,8 @@ def page_employees(engine):
                         embedding = engine.embedding_from_rgb(face_rgb)
                         save_face_sample(selected["employee_id"], face_rgb, embedding)
                         st.success("Face sample and FaceNet embedding saved. Add 3–5 samples with different lighting/angles.")
+    else:
+        st.info("No employees registered yet.")
 
 class AttendanceVideoProcessor(VideoProcessorBase):
     def __init__(self, allowed_employee_id=None):
@@ -470,68 +492,64 @@ def page_settings():
             set_employee_active(emp["employee_id"], new_state)
             st.rerun()
 
-def page_user_panel(employee_id):
-    employees = {e["employee_id"]: e for e in get_employees(active_only=False)}
-    emp = employees.get(employee_id)
-    if not emp:
-        st.error("Employee account is not linked to an employee record. Contact the administrator.")
-        return
-    st.title("👤 User Panel")
-    st.subheader(f'{emp["full_name"]} ({employee_id})')
-    today = get_employee_today_status(employee_id)
-    c1, c2 = st.columns(2)
-    c1.metric("Today's Attendance", today["status"])
-    c2.metric("Check-in Time", today["check_in"].replace("T", " ") if today["check_in"] else "—")
-    st.divider()
-    st.subheader("📷 My Face Recognition Attendance")
+def page_user_panel():
+    """Public landing panel: no employee selection or password is required."""
+    st.title("📷 User Panel — Multi-Face Attendance")
     st.info(
-        "Camera ကိုဖွင့်ပြီး ဝန်ထမ်းအများအပြားကို တစ်ပြိုင်နက် Scan လုပ်နိုင်ပါသည်။ "
-        "Blink challenge အောင်မြင်ပြီး Registered Face ID ကိုက်ညီသူတစ်ဦးချင်းစီအတွက် Attendance မှတ်တမ်းတင်ပါမည်။"
+        "Webcam ကိုဖွင့်လိုက်သည်နှင့် မြင်ကွင်းအတွင်းရှိ Registered ဝန်ထမ်းများ၏ မျက်နှာကို "
+        "တစ်ပြိုင်နက် Detect & Recognize လုပ်ပြီး Liveness စစ်ဆေးမှုအောင်မြင်သူများ၏ Attendance ကို မှတ်တမ်းတင်ပါမည်။"
     )
-    # Multi-face mode: recognize every registered employee visible to the camera.
+    summary = attendance_summary()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Employees", summary["total"])
+    c2.metric("Present Today", summary["present"])
+    c3.metric("Absent Today", summary["absent"])
+
+    st.divider()
+    st.subheader("Live Multi-Face Recognition")
     page_live_recognition()
-    st.caption(
-        "Multi Detection ဖွင့်ထားသောကြောင့် Camera မြင်ကွင်းအတွင်းရှိ Registered ဝန်ထမ်းများကို တစ်ပြိုင်နက် အသိအမှတ်ပြုနိုင်ပါသည်။ "
-        "အပေါ်တွင် ရွေးထားသော ဝန်ထမ်း၏ Present / Absent အခြေအနေကို ပြသထားပါသည်။"
-    )
-    if st.button("🔄 Refresh My Attendance Status", key="refresh_my_attendance"):
+
+    st.divider()
+    st.subheader("Today's Attendance")
+    today_rows = get_attendance(date.today(), date.today())
+    if today_rows:
+        today_df = pd.DataFrame(today_rows)
+        display_cols = [c for c in ["employee_id", "full_name", "department", "check_in", "check_out", "attendance_status"] if c in today_df.columns]
+        today_df = today_df[display_cols].rename(columns={
+            "employee_id": "Employee ID", "full_name": "Employee Name", "department": "Department",
+            "check_in": "Check-in", "check_out": "Check-out", "attendance_status": "Status"
+        })
+        st.dataframe(today_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("ယနေ့ Attendance မှတ်တမ်း မရှိသေးပါ။")
+
+    if st.button("🔄 Refresh Attendance", key="refresh_public_attendance"):
         st.rerun()
 
-def login_page():
-    st.title("🔐 Attendance System")
-    st.write("Admin Panel သို့ဝင်ရန်သာ Admin User ID နှင့် Password လိုအပ်ပါသည်။")
-    st.subheader("Admin Login")
+
+def admin_login_page():
+    st.title("🔐 Admin Login")
+    st.write("Admin Panel သို့ ဝင်ရောက်ရန် Admin User ID နှင့် Password ထည့်ပါ။")
     with st.form("admin_login_form"):
         user_id = st.text_input("Admin User ID")
         password = st.text_input("Admin Password", type="password")
-        submitted = st.form_submit_button("Admin Login", type="primary")
+        submitted = st.form_submit_button("Login to Admin Panel", type="primary")
     if submitted:
         user = authenticate_user(user_id, password)
         if user and user["role"] == "admin":
             st.session_state["auth_user"] = user
+            st.session_state.pop("show_admin_login", None)
             st.rerun()
         else:
             st.error("Admin User ID သို့မဟုတ် Password မှားယွင်းနေပါသည်။")
+    if st.button("← Back to User Panel"):
+        st.session_state.pop("show_admin_login", None)
+        st.rerun()
 
-    st.divider()
-    st.subheader("User Panel")
-    st.info("User Panel ကို Password မလိုဘဲ ဝင်ရောက်နိုင်ပါသည်။ မိမိ Employee ID ကို ရွေးချယ်ပါ။")
-    active_employees = get_employees(active_only=True)
-    if active_employees:
-        selected = st.selectbox(
-            "Select your Employee ID", active_employees,
-            format_func=lambda e: f'{e["employee_id"]} — {e["full_name"]}',
-            key="public_user_employee"
-        )
-        if st.button("Enter User Panel", type="primary"):
-            st.session_state["public_employee_id"] = selected["employee_id"]
-            st.rerun()
-    else:
-        st.warning("Active employee မရှိသေးပါ။ Admin မှ Employee Registration ပြုလုပ်ပါ။")
 
 def main():
     user = st.session_state.get("auth_user")
-    if user:
+    if user and user.get("role") == "admin":
         st.sidebar.title("Face Recognition Attendance")
         st.sidebar.write(f'Logged in: **{user["user_id"]}**')
         if st.sidebar.button("Logout"):
@@ -552,17 +570,22 @@ def main():
             st.info("Check installation steps and terminal output. First FaceNet model initialization may take time.")
         return
 
-    public_employee_id = st.session_state.get("public_employee_id")
-    if public_employee_id:
-        c1, c2 = st.columns([5, 1])
-        with c2:
-            if st.button("Change Employee"):
-                st.session_state.pop("public_employee_id", None)
-                st.rerun()
-        page_user_panel(public_employee_id)
-        return
+    # The application opens directly on the public User Panel.
+    st.sidebar.title("Face Recognition Attendance")
+    st.sidebar.caption("Public User Panel")
+    if st.sidebar.button("🔐 Admin Login", type="primary"):
+        st.session_state["show_admin_login"] = True
+        st.rerun()
 
-    login_page()
+    if st.session_state.get("show_admin_login"):
+        admin_login_page()
+    else:
+        try:
+            page_user_panel()
+        except Exception as exc:
+            st.error(f"Application error: {exc}")
+            st.exception(exc)
+            st.info("Check installation steps and terminal output. First FaceNet model initialization may take time.")
 
 
 if __name__ == "__main__":
