@@ -213,7 +213,7 @@ def page_dashboard():
           use_container_width=True
           )
 
-      else:
+        else:
           st.info("No weekly attendance data yet.")
     with right:
         st.subheader("Attendance Distribution")
