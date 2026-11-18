@@ -198,31 +198,30 @@ def page_dashboard():
     left, right = st.columns(2)
     with left:
        
-st.subheader("Weekly Attendance Analytics")
+    st.subheader("Weekly Attendance Analytics")
 
-weekly_df = pd.DataFrame(weekly_attendance_counts(7))
+    weekly_df = pd.DataFrame(weekly_attendance_counts(7))
 
-if not weekly_df.empty:
-    summary = attendance_summary()
-    total_employees = summary["total"]
+    if not weekly_df.empty:
+      summary = attendance_summary()
+      total_employees = summary["total"]
 
-    weekly_df["Absent"] = (
-        total_employees - weekly_df["Present"]
-    ).clip(lower=0)
+      weekly_df["Absent"] = (
+      total_employees - weekly_df["Present"]
+      ).clip(lower=0)
 
-    # Convert Present and Absent into separate rows
-    chart_df = weekly_df.melt(
+      # Convert Present and Absent into separate rows
+      chart_df = weekly_df.melt(
         id_vars=["Date"],
         value_vars=["Present", "Absent"],
         var_name="Status",
         value_name="Employees"
-    )
+      )
+      import altair as alt
 
-    import altair as alt
-
-    chart = alt.Chart(chart_df).mark_bar(
-        size=20
-    ).encode(
+      chart = alt.Chart(chart_df).mark_bar(
+      size=20
+      ).encode(
         x=alt.X(
             "Date:N",
             title="Date",
@@ -242,17 +241,16 @@ if not weekly_df.empty:
             legend=alt.Legend(title="Attendance Status")
         ),
         tooltip=["Date", "Status", "Employees"]
-    ).properties(
+        ).properties(
         height=350
-    )
+        )
 
-    st.altair_chart(
+        st.altair_chart(
         chart,
         use_container_width=True
-    )
-
-else:
-    st.info("No weekly attendance data yet.")
+        )
+    else:
+      st.info("No weekly attendance data yet.")
     with right:
         st.subheader("Attendance Distribution")
         distribution_df = pd.DataFrame(attendance_distribution())
