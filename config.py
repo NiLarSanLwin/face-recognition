@@ -20,4 +20,4 @@ WORK_START_TIME = "09:00"
 WORK_END_TIME = "17:00"
 LATE_GRACE_MINUTES = 15
 # A second face recognition can become check-out only after this minimum elapsed time.
-MIN_HOURS_BEFORE_AUTO_CHECKOUT = 4
+MIN_HOURS_BEFORE_AUTO_CHECKOUT = 7
