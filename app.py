@@ -199,27 +199,22 @@ def page_dashboard():
     with left:
         st.subheader("Weekly Attendance Analytics")
         weekly_df = pd.DataFrame(weekly_attendance_counts(7))
-       if not weekly_df.empty:
+        if not weekly_df.empty:
+          summary = attendance_summary()
+          total_employees = summary["total"]
+          weekly_df["Absent"] = (
+          total_employees - weekly_df["Present"]).clip(lower=0)
+          chart_df = weekly_df.set_index("Date")[
+          ["Present", "Absent"]
+          ]
+          st.bar_chart(
+          chart_df,
+          color=["#16A34A", "#DC2626"],
+          use_container_width=True
+          )
 
-    summary = attendance_summary()
-    total_employees = summary["total"]
-
-    weekly_df["Absent"] = (
-        total_employees - weekly_df["Present"]
-    ).clip(lower=0)
-
-    chart_df = weekly_df.set_index("Date")[
-        ["Present", "Absent"]
-    ]
-
-    st.bar_chart(
-        chart_df,
-        color=["#16A34A", "#DC2626"],
-        use_container_width=True
-    )
-
-else:
-    st.info("No weekly attendance data yet.")
+      else:
+          st.info("No weekly attendance data yet.")
     with right:
         st.subheader("Attendance Distribution")
         distribution_df = pd.DataFrame(attendance_distribution())
