@@ -195,34 +195,31 @@ def page_dashboard():
     c4.metric("Late", late_count)
 
     st.divider()
-    left, right = st.columns(2)
-    with left:
-        st.subheader("Weekly Attendance Analytics")
-        weekly_df = pd.DataFrame(weekly_attendance_counts(7))
-        if not weekly_df.empty:
-            st.bar_chart(weekly_df.set_index("Date"), y="Present", use_container_width=True)
-        else:
-            st.info("No weekly attendance data yet.")
-    with right:
-        st.subheader("Attendance Distribution")
-        distribution_df = pd.DataFrame(attendance_distribution())
-        if int(distribution_df["Employees"].sum()) > 0:
-            st.vega_lite_chart(
-                distribution_df,
-                {
-                    "mark": {"type": "arc", "innerRadius": 55},
-                    "encoding": {
-                        "theta": {"field": "Employees", "type": "quantitative"},
-                        "color": {"field": "Status", "type": "nominal",
-                                  "scale": {"domain": ["Present", "Absent"], "range": ["#D9A02E", "#8B2929"]}},
-                        "tooltip": [{"field": "Status"}, {"field": "Employees"}]
-                    }
-                },
-                use_container_width=True
-            )
-            st.dataframe(distribution_df, hide_index=True, use_container_width=True)
-        else:
-            st.info("No employee attendance distribution to display.")
+    st.subheader("Weekly Attendance Analytics")
+
+weekly_df = pd.DataFrame(weekly_attendance_counts(7))
+
+if not weekly_df.empty:
+
+    total_employees = summary["total"]
+
+    weekly_df["Absent"] = (
+        total_employees - weekly_df["Present"]
+    ).clip(lower=0)
+
+    chart_df = weekly_df.set_index("Date")[
+        ["Present", "Absent"]
+    ]
+
+    st.bar_chart(
+        chart_df,
+        color=["#16A34A", "#DC2626"],
+        use_container_width=True
+    )
+
+else:
+    st.info("No weekly attendance data yet.")
+              
 
     st.divider()
     st.subheader("Recent Attendance Activity")
