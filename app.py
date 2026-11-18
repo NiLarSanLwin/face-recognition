@@ -197,24 +197,62 @@ def page_dashboard():
     st.divider()
     left, right = st.columns(2)
     with left:
-        st.subheader("Weekly Attendance Analytics")
-        weekly_df = pd.DataFrame(weekly_attendance_counts(7))
-        if not weekly_df.empty:
-          summary = attendance_summary()
-          total_employees = summary["total"]
-          weekly_df["Absent"] = (
-          total_employees - weekly_df["Present"]).clip(lower=0)
-          chart_df = weekly_df.set_index("Date")[
-          ["Present", "Absent"]
-          ]
-          st.bar_chart(
-          chart_df,
-          color=["#16A34A", "#DC2626"],
-          use_container_width=True
-          )
+       
+st.subheader("Weekly Attendance Analytics")
 
-        else:
-          st.info("No weekly attendance data yet.")
+weekly_df = pd.DataFrame(weekly_attendance_counts(7))
+
+if not weekly_df.empty:
+    summary = attendance_summary()
+    total_employees = summary["total"]
+
+    weekly_df["Absent"] = (
+        total_employees - weekly_df["Present"]
+    ).clip(lower=0)
+
+    # Convert Present and Absent into separate rows
+    chart_df = weekly_df.melt(
+        id_vars=["Date"],
+        value_vars=["Present", "Absent"],
+        var_name="Status",
+        value_name="Employees"
+    )
+
+    import altair as alt
+
+    chart = alt.Chart(chart_df).mark_bar(
+        size=20
+    ).encode(
+        x=alt.X(
+            "Date:N",
+            title="Date",
+            sort=None
+        ),
+        xOffset=alt.XOffset("Status:N"),
+        y=alt.Y(
+            "Employees:Q",
+            title="Number of Employees"
+        ),
+        color=alt.Color(
+            "Status:N",
+            scale=alt.Scale(
+                domain=["Present", "Absent"],
+                range=["#16A34A", "#DC2626"]
+            ),
+            legend=alt.Legend(title="Attendance Status")
+        ),
+        tooltip=["Date", "Status", "Employees"]
+    ).properties(
+        height=350
+    )
+
+    st.altair_chart(
+        chart,
+        use_container_width=True
+    )
+
+else:
+    st.info("No weekly attendance data yet.")
     with right:
         st.subheader("Attendance Distribution")
         distribution_df = pd.DataFrame(attendance_distribution())
