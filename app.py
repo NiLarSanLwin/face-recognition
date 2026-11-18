@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import streamlit as st
+import shutil
 from PIL import Image
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 import altair as alt
@@ -291,7 +292,7 @@ def page_employees(engine):
             if cols[5].button("Delete", key=f'delete_employee_{emp["employee_id"]}'):
                 try:
                     if delete_employee(emp["employee_id"]):
-                        import shutil
+                        
                         shutil.rmtree(FACES_DIR / emp["employee_id"], ignore_errors=True)
                         if st.session_state.get("edit_employee_id") == emp["employee_id"]:
                             st.session_state.pop("edit_employee_id", None)
