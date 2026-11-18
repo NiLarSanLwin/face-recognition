@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
-
+import altair as alt
 from config import (FACES_DIR, MATCH_THRESHOLD, ATTENDANCE_COOLDOWN_SECONDS,
                     WORK_START_TIME, WORK_END_TIME, LATE_GRACE_MINUTES, MIN_HOURS_BEFORE_AUTO_CHECKOUT)
 from database import (
@@ -196,13 +196,53 @@ def page_dashboard():
 
     st.divider()
     left, right = st.columns(2)
-    with left:
-        st.subheader("Weekly Attendance Analytics")
-        weekly_df = pd.DataFrame(weekly_attendance_counts(7))
-        if not weekly_df.empty:
-            st.bar_chart(weekly_df.set_index("Date"), y="Present", use_container_width=True)
-        else:
-            st.info("No weekly attendance data yet.")
+    with left:        
+      st.subheader("Weekly Attendance Analytics")
+      weekly_df = pd.DataFrame(weekly_attendance_counts(7))
+      if not weekly_df.empty:
+        summary = attendance_summary()
+        total_employees = summary["total"]
+        weekly_df["Absent"] = (
+        total_employees - weekly_df["Present"]
+        ).clip(lower=0)
+        # Convert Present and Absent into separate rows
+        chart_df = weekly_df.melt(
+          id_vars=["Date"],
+          value_vars=["Present", "Absent"],
+          var_name="Status",
+          value_name="Employees"
+          ) 
+        chart = alt.Chart(chart_df).mark_bar(
+        size=20
+        ).encode(
+        x=alt.X(
+            "Date:N",
+            title="Date",
+            sort=None
+        ),
+        xOffset=alt.XOffset("Status:N"),
+        y=alt.Y(
+            "Employees:Q",
+            title="Number of Employees"
+        ),
+        color=alt.Color(
+            "Status:N",
+            scale=alt.Scale(
+                domain=["Present", "Absent"],
+                range=["#16A34A", "#DC2626"]
+            ),
+            legend=alt.Legend(title="Attendance Status")
+        ),
+        tooltip=["Date", "Status", "Employees"]
+        ).properties(
+        height=350
+        )
+        st.altair_chart(
+        chart,
+        use_container_width=True
+        )
+      else:
+        st.info("No weekly attendance data yet.")
     with right:
         st.subheader("Attendance Distribution")
         distribution_df = pd.DataFrame(attendance_distribution())
