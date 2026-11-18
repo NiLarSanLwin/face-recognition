@@ -114,19 +114,6 @@ def ensure_default_admin():
             conn.execute("INSERT INTO users(user_id,password_hash,role,created_at) VALUES(?,?,?,?)",
                 ("admin", _password_hash("admin123"), "admin", datetime.now().isoformat(timespec='seconds')))
 
-def create_employee_user(user_id, password, employee_id):
-    with get_connection() as conn:
-        conn.execute("INSERT INTO users(user_id,password_hash,role,employee_id,created_at) VALUES(?,?,?,?,?)",
-            (user_id.strip(), _password_hash(password), "user", employee_id,
-             datetime.now().isoformat(timespec='seconds')))
-
-def authenticate_user(user_id, password):
-    with get_connection() as conn:
-        row = conn.execute("SELECT * FROM users WHERE user_id=? AND active=1", (user_id.strip(),)).fetchone()
-    if row and verify_password(password, row["password_hash"]):
-        return {"user_id": row["user_id"], "role": row["role"], "employee_id": row["employee_id"]}
-    return None
-
 def get_employee_today_status(employee_id):
     with get_connection() as conn:
         row = conn.execute("SELECT check_in FROM attendance WHERE employee_id=? AND attendance_date=?",
