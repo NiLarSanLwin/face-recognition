@@ -244,26 +244,7 @@ def page_dashboard():
       else:
         st.info("No weekly attendance data yet.")
     with right:
-        st.subheader("Attendance Distribution")
-        distribution_df = pd.DataFrame(attendance_distribution())
-        if int(distribution_df["Employees"].sum()) > 0:
-            st.vega_lite_chart(
-                distribution_df,
-                {
-                    "mark": {"type": "arc", "innerRadius": 55},
-                    "encoding": {
-                        "theta": {"field": "Employees", "type": "quantitative"},
-                        "color": {"field": "Status", "type": "nominal",
-                                  "scale": {"domain": ["Present", "Absent"], "range": ["#D9A02E", "#8B2929"]}},
-                        "tooltip": [{"field": "Status"}, {"field": "Employees"}]
-                    }
-                },
-                use_container_width=True
-            )
-            st.dataframe(distribution_df, hide_index=True, use_container_width=True)
-        else:
-            st.info("No employee attendance distribution to display.")
-      
+       
     st.divider()
     st.subheader("AI Recognition Statistics — Today")
     ai = recognition_statistics()
