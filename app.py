@@ -195,7 +195,7 @@ def page_dashboard():
     c4.metric("Late", late_count)
 
     st.divider()
-    left, right = st.columns(2)
+    left = st.columns(1)
     with left:        
       st.subheader("Weekly Attendance Analytics")
       weekly_df = pd.DataFrame(weekly_attendance_counts(7))
@@ -243,40 +243,7 @@ def page_dashboard():
         )
       else:
         st.info("No weekly attendance data yet.")
-    with right:
-        st.subheader("Attendance Distribution")
-        distribution_df = pd.DataFrame(attendance_distribution())
-        if int(distribution_df["Employees"].sum()) > 0:
-            st.vega_lite_chart(
-                distribution_df,
-                {
-                    "mark": {"type": "arc", "innerRadius": 55},
-                    "encoding": {
-                        "theta": {"field": "Employees", "type": "quantitative"},
-                        "color": {"field": "Status", "type": "nominal",
-                                  "scale": {"domain": ["Present", "Absent"], "range": ["#D9A02E", "#8B2929"]}},
-                        "tooltip": [{"field": "Status"}, {"field": "Employees"}]
-                    }
-                },
-                use_container_width=True
-            )
-            st.dataframe(distribution_df, hide_index=True, use_container_width=True)
-        else:
-            st.info("No employee attendance distribution to display.")
-
-    st.divider()
-    st.subheader("Recent Attendance Activity")
-    activity = recent_attendance_activity(10)
-    if activity:
-        activity_df = pd.DataFrame(activity).rename(columns={
-            "event_time": "Time", "event_type": "Activity", "employee_id": "Employee ID",
-            "full_name": "Employee Name", "department": "Department", "method": "Method", "note": "Details"
-        })
-        st.dataframe(activity_df[["Time", "Employee ID", "Employee Name", "Department", "Activity", "Method", "Details"]],
-                     use_container_width=True, hide_index=True)
-    else:
-        st.info("No attendance activity recorded yet.")
-
+      
     st.divider()
     st.subheader("AI Recognition Statistics — Today")
     ai = recognition_statistics()
