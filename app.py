@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
-
+from database import attendance_summary
 from config import (FACES_DIR, MATCH_THRESHOLD, ATTENDANCE_COOLDOWN_SECONDS,
                     WORK_START_TIME, WORK_END_TIME, LATE_GRACE_MINUTES, MIN_HOURS_BEFORE_AUTO_CHECKOUT)
 from database import (
@@ -201,6 +201,7 @@ weekly_df = pd.DataFrame(weekly_attendance_counts(7))
 
 if not weekly_df.empty:
 
+    summary = attendance_summary()
     total_employees = summary["total"]
 
     weekly_df["Absent"] = (
@@ -219,7 +220,7 @@ if not weekly_df.empty:
 
 else:
     st.info("No weekly attendance data yet.")
-              
+   
 
     st.divider()
     st.subheader("Recent Attendance Activity")
