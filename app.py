@@ -194,9 +194,9 @@ def page_dashboard():
     c3.metric("Absent", summary["absent"])
     c4.metric("Late", late_count)
     st.divider()
-      with st.container(border=True):
-      st.subheader("Weekly Attendance Analytics")
-      weekly_df = pd.DataFrame(weekly_attendance_counts(7))
+    with st.container(border=True):
+    st.subheader("Weekly Attendance Analytics")
+    weekly_df = pd.DataFrame(weekly_attendance_counts(7))
       if not weekly_df.empty:
         summary = attendance_summary()
         total_employees = summary["total"]
