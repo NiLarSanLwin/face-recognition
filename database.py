@@ -157,6 +157,30 @@ def set_employee_active(employee_id, active):
         conn.execute("UPDATE employees SET active=? WHERE employee_id=?", (int(active), employee_id))
 
 
+def update_employee(employee_id, full_name, department='', email=''):
+    with get_connection() as conn:
+        cur = conn.execute(
+            "UPDATE employees SET full_name=?, department=?, email=? WHERE employee_id=?",
+            (full_name.strip(), department.strip(), email.strip(), employee_id)
+        )
+        return cur.rowcount > 0
+
+
+def delete_employee(employee_id):
+    """Permanently remove an employee and records directly linked to that employee."""
+    with get_connection() as conn:
+        exists = conn.execute("SELECT 1 FROM employees WHERE employee_id=?", (employee_id,)).fetchone()
+        if not exists:
+            return False
+        conn.execute("DELETE FROM face_embeddings WHERE employee_id=?", (employee_id,))
+        conn.execute("DELETE FROM attendance_events WHERE employee_id=?", (employee_id,))
+        conn.execute("DELETE FROM attendance WHERE employee_id=?", (employee_id,))
+        conn.execute("DELETE FROM users WHERE employee_id=?", (employee_id,))
+        conn.execute("UPDATE recognition_attempts SET employee_id=NULL WHERE employee_id=?", (employee_id,))
+        conn.execute("DELETE FROM employees WHERE employee_id=?", (employee_id,))
+        return True
+
+
 def add_embedding(employee_id, embedding):
     import numpy as np
     arr = np.asarray(embedding, dtype=np.float32).reshape(-1)
