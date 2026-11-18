@@ -18,7 +18,8 @@ from database import (
     get_missing_checkouts, attendance_summary, set_employee_active,
     log_recognition_attempt, recognition_statistics, recent_attendance_activity,
     weekly_attendance_counts, attendance_distribution,
-    ensure_default_admin, authenticate_user, create_employee_user, get_employee_today_status
+    ensure_default_admin, authenticate_user, get_employee_today_status,
+    update_employee, delete_employee
 )
 from face_engine import FaceEngine, BlinkLivenessDetector
 
@@ -237,7 +238,14 @@ def page_dashboard():
         st.info("No attendance activity recorded yet.")
 
     st.divider()
-   
+    st.subheader("AI Recognition Statistics — Today")
+    ai = recognition_statistics()
+    a1, a2, a3 = st.columns(3)
+    a1.metric("Recognition Success", ai["success"])
+    a2.metric("Unknown Face", ai["unknown"])
+    a3.metric("Failed Attempts", ai["failed"])
+    st.caption("Recognition statistics count throttled camera recognition outcomes recorded by the Live Recognition page.")
+
     missing = get_missing_checkouts(date.today())
     if missing:
         st.error(f"Missing check-out alert: {len(missing)} employee(s) have not checked out.")
@@ -251,17 +259,15 @@ def page_employees(engine):
         full_name = st.text_input("Full name *")
         department = st.text_input("Department")
         email = st.text_input("Email")
-        login_user_id = st.text_input("User Login ID *")
-        login_password = st.text_input("User Login Password *", type="password")
         submitted = st.form_submit_button("Create Employee", type="primary")
     if submitted:
-        if not employee_id.strip() or not full_name.strip() or not login_user_id.strip() or not login_password:
-            st.error("Employee ID, full name, User Login ID and password are required.")
+        if not employee_id.strip() or not full_name.strip():
+            st.error("Employee ID and full name are required.")
         else:
             try:
                 add_employee(employee_id, full_name, department, email)
-                create_employee_user(login_user_id, login_password, employee_id.strip())
-                st.success("Employee and user login created. Capture face samples below.")
+                st.success("Employee created. Capture face samples below.")
+                st.rerun()
             except Exception as exc:
                 st.error(f"Could not create employee: {exc}")
 
@@ -271,10 +277,46 @@ def page_employees(engine):
         df = pd.DataFrame(employees)
         st.dataframe(df[["employee_id", "full_name", "department", "email", "active", "created_at"]],
                      use_container_width=True, hide_index=True)
+
+        st.markdown("#### Update Employee")
+        selected_edit = st.selectbox(
+            "Choose employee to update", employees,
+            format_func=lambda e: f'{e["employee_id"]} — {e["full_name"]}', key="edit_employee_select"
+        )
+        with st.form("update_employee_form"):
+            edit_name = st.text_input("Full name", value=selected_edit["full_name"])
+            edit_department = st.text_input("Department", value=selected_edit["department"] or "")
+            edit_email = st.text_input("Email", value=selected_edit["email"] or "")
+            update_submitted = st.form_submit_button("Update Employee", type="primary")
+        if update_submitted:
+            if not edit_name.strip():
+                st.error("Full name is required.")
+            elif update_employee(selected_edit["employee_id"], edit_name, edit_department, edit_email):
+                st.success("Employee information updated.")
+                st.rerun()
+
+        st.markdown("#### Delete Employee")
+        delete_target = st.selectbox(
+            "Choose employee to delete", employees,
+            format_func=lambda e: f'{e["employee_id"]} — {e["full_name"]}', key="delete_employee_select"
+        )
+        confirm_delete = st.checkbox(
+            f'I understand that deleting {delete_target["full_name"]} permanently removes their attendance history and face samples.',
+            key="confirm_delete_employee"
+        )
+        if st.button("Delete Employee", type="secondary", disabled=not confirm_delete):
+            if delete_employee(delete_target["employee_id"]):
+                import shutil
+                shutil.rmtree(FACES_DIR / delete_target["employee_id"], ignore_errors=True)
+                st.success("Employee and related records deleted.")
+                st.rerun()
+
+        st.divider()
         st.subheader("Capture Face Samples")
         active = [e for e in employees if e["active"]]
         if active:
-            selected = st.selectbox("Select employee", active, format_func=lambda e: f'{e["employee_id"]} — {e["full_name"]}')
+            selected = st.selectbox("Select employee for face registration", active,
+                                    format_func=lambda e: f'{e["employee_id"]} — {e["full_name"]}')
             capture = st.camera_input("Take a clear, front-facing face photo", key="registration_camera")
             if capture:
                 bgr = image_to_bgr(capture)
@@ -288,11 +330,6 @@ def page_employees(engine):
                         embedding = engine.embedding_from_rgb(face_rgb)
                         save_face_sample(selected["employee_id"], face_rgb, embedding)
                         st.success("Face sample and FaceNet embedding saved. Add 3–5 samples with different lighting/angles.")
-        inactive = [e for e in employees if not e["active"]]
-        if inactive:
-            st.subheader("Inactive Employees")
-            for e in inactive:
-                st.write(f'{e["employee_id"]} — {e["full_name"]}')
 
 class AttendanceVideoProcessor(VideoProcessorBase):
     def __init__(self, allowed_employee_id=None):
@@ -313,6 +350,9 @@ class AttendanceVideoProcessor(VideoProcessorBase):
             self.last_refresh = now
         boxes = self.engine.detect(image)
         liveness_results = self.liveness.update(image, boxes, now)
+        # Haar Cascade returns all detected face boxes; process each face independently.
+        cv2.putText(image, f"Faces detected: {len(boxes)}", (10, 28),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
 
         for box, (is_live, liveness_message) in zip(boxes, liveness_results):
             x, y, w, h = box
@@ -445,59 +485,84 @@ def page_user_panel(employee_id):
     st.divider()
     st.subheader("📷 My Face Recognition Attendance")
     st.info(
-        "Camera ကိုဖွင့်ပြီး မိမိမျက်နှာကိုသာ Scan လုပ်ပါ။ "
-        "Blink challenge အောင်မြင်ပြီး မိမိ Face ID ကိုက်ညီမှသာ Attendance မှတ်တမ်းတင်ပါမည်။"
+        "Camera ကိုဖွင့်ပြီး ဝန်ထမ်းအများအပြားကို တစ်ပြိုင်နက် Scan လုပ်နိုင်ပါသည်။ "
+        "Blink challenge အောင်မြင်ပြီး Registered Face ID ကိုက်ညီသူတစ်ဦးချင်းစီအတွက် Attendance မှတ်တမ်းတင်ပါမည်။"
     )
-    # Restrict recognition to the employee linked to the currently authenticated account.
-    page_live_recognition(allowed_employee_id=employee_id)
+    # Multi-face mode: recognize every registered employee visible to the camera.
+    page_live_recognition()
     st.caption(
-        "လုံခြုံရေးအတွက် အခြားဝန်ထမ်း၏မျက်နှာကို မှတ်မည်မဟုတ်ပါ။ "
-        "မိမိ၏ Check-in / Check-out အချိန်နှင့် Present / Absent အခြေအနေကိုသာ ပြသထားပါသည်။"
+        "Multi Detection ဖွင့်ထားသောကြောင့် Camera မြင်ကွင်းအတွင်းရှိ Registered ဝန်ထမ်းများကို တစ်ပြိုင်နက် အသိအမှတ်ပြုနိုင်ပါသည်။ "
+        "အပေါ်တွင် ရွေးထားသော ဝန်ထမ်း၏ Present / Absent အခြေအနေကို ပြသထားပါသည်။"
     )
     if st.button("🔄 Refresh My Attendance Status", key="refresh_my_attendance"):
         st.rerun()
 
 def login_page():
-    st.title("🔐 Attendance System Login")
-    st.write("Admin Panel နှင့် User Panel သို့ ဝင်ရန် User ID နှင့် Password ဖြည့်ပါ။")
-    with st.form("login_form"):
-        user_id = st.text_input("User ID")
-        password = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Login", type="primary")
+    st.title("🔐 Attendance System")
+    st.write("Admin Panel သို့ဝင်ရန်သာ Admin User ID နှင့် Password လိုအပ်ပါသည်။")
+    st.subheader("Admin Login")
+    with st.form("admin_login_form"):
+        user_id = st.text_input("Admin User ID")
+        password = st.text_input("Admin Password", type="password")
+        submitted = st.form_submit_button("Admin Login", type="primary")
     if submitted:
         user = authenticate_user(user_id, password)
-        if user:
+        if user and user["role"] == "admin":
             st.session_state["auth_user"] = user
             st.rerun()
         else:
-            st.error("User ID သို့မဟုတ် Password မှားယွင်းနေပါသည်။")
+            st.error("Admin User ID သို့မဟုတ် Password မှားယွင်းနေပါသည်။")
+
+    st.divider()
+    st.subheader("User Panel")
+    st.info("User Panel ကို Password မလိုဘဲ ဝင်ရောက်နိုင်ပါသည်။ မိမိ Employee ID ကို ရွေးချယ်ပါ။")
+    active_employees = get_employees(active_only=True)
+    if active_employees:
+        selected = st.selectbox(
+            "Select your Employee ID", active_employees,
+            format_func=lambda e: f'{e["employee_id"]} — {e["full_name"]}',
+            key="public_user_employee"
+        )
+        if st.button("Enter User Panel", type="primary"):
+            st.session_state["public_employee_id"] = selected["employee_id"]
+            st.rerun()
+    else:
+        st.warning("Active employee မရှိသေးပါ။ Admin မှ Employee Registration ပြုလုပ်ပါ။")
 
 def main():
     user = st.session_state.get("auth_user")
-    if not user:
-        login_page()
+    if user:
+        st.sidebar.title("Face Recognition Attendance")
+        st.sidebar.write(f'Logged in: **{user["user_id"]}**')
+        if st.sidebar.button("Logout"):
+            st.session_state.pop("auth_user", None)
+            st.rerun()
+        st.sidebar.subheader("Admin Panel")
+        page = st.sidebar.radio("Navigation", ["Dashboard", "Employee Registration", "Live Recognition", "Attendance Records", "Settings"])
+        try:
+            engine = load_engine() if page in ("Employee Registration", "Live Recognition") else None
+            if page == "Dashboard": page_dashboard()
+            elif page == "Employee Registration": page_employees(engine)
+            elif page == "Live Recognition": page_live_recognition()
+            elif page == "Attendance Records": page_records()
+            else: page_settings()
+        except Exception as exc:
+            st.error(f"Application error: {exc}")
+            st.exception(exc)
+            st.info("Check installation steps and terminal output. First FaceNet model initialization may take time.")
         return
-    st.sidebar.title("Face Recognition Attendance")
-    st.sidebar.write(f'Logged in: **{user["user_id"]}**')
-    if st.sidebar.button("Logout"):
-        st.session_state.pop("auth_user", None)
-        st.rerun()
-    if user["role"] == "user":
-        page_user_panel(user["employee_id"])
+
+    public_employee_id = st.session_state.get("public_employee_id")
+    if public_employee_id:
+        c1, c2 = st.columns([5, 1])
+        with c2:
+            if st.button("Change Employee"):
+                st.session_state.pop("public_employee_id", None)
+                st.rerun()
+        page_user_panel(public_employee_id)
         return
-    st.sidebar.subheader("Admin Panel")
-    page = st.sidebar.radio("Navigation", ["Dashboard", "Employee Registration", "Live Recognition", "Attendance Records", "Settings"])
-    try:
-        engine = load_engine() if page in ("Employee Registration", "Live Recognition") else None
-        if page == "Dashboard": page_dashboard()
-        elif page == "Employee Registration": page_employees(engine)
-        elif page == "Live Recognition": page_live_recognition()
-        elif page == "Attendance Records": page_records()
-        else: page_settings()
-    except Exception as exc:
-        st.error(f"Application error: {exc}")
-        st.exception(exc)
-        st.info("Check installation steps and terminal output. First FaceNet model initialization may take time.")
+
+    login_page()
 
 
 if __name__ == "__main__":
