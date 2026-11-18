@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
-
+import altair as alt
 from config import (FACES_DIR, MATCH_THRESHOLD, ATTENDANCE_COOLDOWN_SECONDS,
                     WORK_START_TIME, WORK_END_TIME, LATE_GRACE_MINUTES, MIN_HOURS_BEFORE_AUTO_CHECKOUT)
 from database import (
@@ -212,7 +212,7 @@ def page_dashboard():
         var_name="Status",
         value_name="Employees"
         )
-        import altair as alt
+        
         chart = alt.Chart(chart_df).mark_bar(
         size=20
         ).encode(
